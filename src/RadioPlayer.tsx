@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import Visualizer from "./Visualizer";
 import History from "./History";
 import Footer from "./Footer";
-import type { NowPlayingResponse, HistoryItem } from "../types";
+import type { HistoryItem } from "./types";
 
 interface Props {
   streamUrl: string;

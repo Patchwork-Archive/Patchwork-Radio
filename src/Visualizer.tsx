@@ -31,6 +31,7 @@ export default function Visualizer({ audioRef, isPlaying }: Props) {
       audioCtxRef.current = new AudioCtx();
     }
     const actx = audioCtxRef.current;
+    if (!actx) return;
 
     if (actx.state === "suspended" && typeof actx.resume === "function") {
       try {
@@ -59,7 +60,8 @@ export default function Visualizer({ audioRef, isPlaying }: Props) {
       }
     } catch {}
 
-    dataRef.current = new Uint8Array(analyserRef.current!.frequencyBinCount);
+    const count = analyserRef.current!.frequencyBinCount;
+    dataRef.current = new Uint8Array(count);
   };
 
   const draw = (): void => {
@@ -75,7 +77,7 @@ export default function Visualizer({ audioRef, isPlaying }: Props) {
 
     const render = () => {
       rafRef.current = requestAnimationFrame(render);
-      analyser.getByteFrequencyData(data);
+      analyser.getByteFrequencyData(data as any);
 
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
