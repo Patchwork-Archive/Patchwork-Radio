@@ -33,12 +33,48 @@ export default function RadioPlayer({
   const [history, setHistory] = useState<HistoryItem[]>([]);
 
   /* ---------------- AUDIO ---------------- */
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    if (isPlaying) {
+      audio
+        .play()
+        .then(() => {
+        })
+        .catch(() => {
+          setIsPlaying(false);
+        });
+    } else {
+      try {
+        audio.pause();
+      } catch {
+        // ignore
+      }
+    }
+  }, [isPlaying]);
 
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio) return;
-    isPlaying ? audio.play().catch(() => {}) : audio.pause();
-  }, [isPlaying]);
+
+    const onPlaying = () => setIsPlaying(true);
+    const onPause = () => setIsPlaying(false);
+    const onEnded = () => setIsPlaying(false);
+    const onError = () => setIsPlaying(false);
+
+    audio.addEventListener("playing", onPlaying);
+    audio.addEventListener("pause", onPause);
+    audio.addEventListener("ended", onEnded);
+    audio.addEventListener("error", onError);
+
+    return () => {
+      audio.removeEventListener("playing", onPlaying);
+      audio.removeEventListener("pause", onPause);
+      audio.removeEventListener("ended", onEnded);
+      audio.removeEventListener("error", onError);
+    };
+  }, []);
 
   useEffect(() => {
     const saved = localStorage.getItem(VOLUME_KEY);
@@ -116,7 +152,6 @@ export default function RadioPlayer({
   /* ---------------- NOW PLAYING ---------------- */
 
   useEffect(() => {
-
     const fetchNowPlaying = async (): Promise<void> => {
       try {
         const res = await fetch(nowPlayingUrl);
@@ -144,9 +179,9 @@ export default function RadioPlayer({
             if (j2 && j2.video_id) videoId = String(j2.video_id);
           }
         } catch (e) {
+          // ignore search errors
         }
 
-        // remember the current video's id so we can show the thumbnail in the player
         setCurrentVideoId(videoId);
 
         setHistory((prev) => {
@@ -161,14 +196,15 @@ export default function RadioPlayer({
             ...prev.slice(0, 9),
           ];
         });
-      } catch {}
+      } catch {
+        // ignore fetch errors
+      }
     };
 
     fetchNowPlaying();
     const interval = window.setInterval(fetchNowPlaying, 15000);
     return () => clearInterval(interval);
   }, [nowPlayingUrl]);
-
 
   useEffect(() => {
     if (!("mediaSession" in navigator)) return;
@@ -179,19 +215,58 @@ export default function RadioPlayer({
       album: "YouTube Radio",
     });
 
-    navigator.mediaSession.setActionHandler("play", () =>
-      setIsPlaying(true)
-    );
-    navigator.mediaSession.setActionHandler("pause", () =>
-      setIsPlaying(false)
-    );
+    navigator.mediaSession.setActionHandler("play", () => setIsPlaying(true));
+    navigator.mediaSession.setActionHandler("pause", () => setIsPlaying(false));
   }, [title, artist]);
+
+  /* ---------------- UI / Controls ---------------- */
+
+  const handlePlayButton = async () => {
+    const audio = audioRef.current;
+    try {
+      const AudioCtx = (window as any).AudioContext || (window as any).webkitAudioContext;
+      if (AudioCtx) {
+        const tmp = new AudioCtx();
+        if (tmp && typeof tmp.resume === "function") {
+          await tmp.resume();
+          try {
+            await tmp.close();
+          } catch {}
+        }
+      }
+    } catch {
+      // ignore
+    }
+
+    if (!audio) {
+      setStarted(true);
+      setIsPlaying(false);
+      return;
+    }
+
+    if (!started) {
+      try {
+        try {
+          audio.crossOrigin = "anonymous";
+        } catch {}
+        await audio.play();
+        setStarted(true);
+        setIsPlaying(true);
+      } catch (e) {
+        setStarted(true);
+        setIsPlaying(false);
+      }
+      return;
+    }
+
+    // After we've started and unlocked playback, toggling play uses the shared isPlaying state.
+    setIsPlaying((p) => !p);
+  };
 
   return (
     <>
       <main className="center">
         <div className="player">
-
           {currentVideoId ? (
             <div className="player-thumb-wrap" style={{ textAlign: "center", marginBottom: 10 }}>
               <a href={`https://patchwork.moekyun.me/watch?v=${currentVideoId}`} target="_blank" rel="noopener noreferrer">
@@ -207,26 +282,20 @@ export default function RadioPlayer({
           <h1>{title}</h1>
           <div className="artist">{artist}</div>
           <div className="artist">
-            Listeners: {typeof listeners === "number"
+            Listeners:{" "}
+            {typeof listeners === "number"
               ? listeners
-              : `total: ${listeners.total}${listeners.unique !== undefined ? `, unique: ${listeners.unique}` : ""}${listeners.current !== undefined ? `, current: ${listeners.current}` : ""}`}
+              : `total: ${listeners.total}${listeners.unique !== undefined ? `, unique: ${listeners.unique}` : ""}${
+                  listeners.current !== undefined ? `, current: ${listeners.current}` : ""
+                }`}
           </div>
 
           <div className="viz-wrap">
             <Visualizer audioRef={audioRef} />
-            <div className="viz-overlay viz-top-left">
-              Listened: {formatTime(listened)}
-            </div>
+            <div className="viz-overlay viz-top-left">Listened: {formatTime(listened)}</div>
             <div className="viz-overlay viz-top-right">
               Vol
-              <input
-                type="range"
-                min="0"
-                max="1"
-                step="0.01"
-                value={volume}
-                onChange={(e) => setVolume(Number(e.target.value))}
-              />
+              <input type="range" min="0" max="1" step="0.01" value={volume} onChange={(e) => setVolume(Number(e.target.value))} />
             </div>
           </div>
 
@@ -237,37 +306,10 @@ export default function RadioPlayer({
               <button className="btn" onClick={resync}>
                 Resync
               </button>
-              <div className="latency-display">
-                Latency: {latency !== null ? `${latency}ms` : "—"}
-              </div>
+              <div className="latency-display">Latency: {latency !== null ? `${latency}ms` : "—"}</div>
             </div>
 
-            <button
-              className="btn"
-              onClick={async () => {
-                const audio = audioRef.current;
-                if (!started) {
-                  try {
-                    const AudioCtx = (window as any).AudioContext || (window as any).webkitAudioContext;
-                    if (AudioCtx) {
-                      const tmp = new AudioCtx();
-                      if (tmp && typeof tmp.resume === "function") {
-                        await tmp.resume();
-                        try { await tmp.close(); } catch {}
-                      }
-                    }
-                  } catch {}
-                  if (audio) {
-                    try { audio.crossOrigin = "anonymous"; } catch {}
-                    try { await audio.play(); } catch {}
-                  }
-                  setStarted(true);
-                  setIsPlaying(true);
-                  return;
-                }
-                setIsPlaying((p) => !p);
-              }}
-            >
+            <button className="btn" onClick={handlePlayButton}>
               {isPlaying ? "Pause" : "Play"}
             </button>
           </div>
